@@ -65,6 +65,13 @@ def register_error_handlers(app: FastAPI) -> None:
             return error_response(409, error, message)
         return error_response(409, "conflict", f"Нарушено ограничение БД: {name}")
 
+    # два одновременных запроса на один слот: Postgres может оборвать один из них (deadlock).
+    # это наследник OperationalError, поэтому ловим отдельно, иначе ушло бы в 503
+    @app.exception_handler(pg_errors.DeadlockDetected)
+    @app.exception_handler(pg_errors.SerializationFailure)
+    def concurrent_conflict(request: Request, exc: Exception):
+        return error_response(409, "concurrent_conflict", "Эти данные одновременно меняет другой запрос, повторите попытку")
+
     @app.exception_handler(OperationalError)
     @app.exception_handler(PoolTimeout)
     def db_unavailable(request: Request, exc: Exception):

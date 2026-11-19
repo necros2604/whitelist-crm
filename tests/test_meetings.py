@@ -1,3 +1,5 @@
+import threading
+
 # 2026-11-20 - пятница. 10:00 по Алматы = 05:00 UTC
 FRIDAY_10_00 = "2026-11-20T10:00:00+05:00"
 FRIDAY_10_30 = "2026-11-20T10:30:00+05:00"
@@ -184,3 +186,24 @@ def test_cancelled_meeting_cannot_be_changed(client):
 
     assert response.status_code == 409
     assert response.json()["error"] == "meeting_cancelled"
+
+
+def test_same_slot_at_the_same_time(client, db):
+    first_company_id = create_company(client, "100000000001")
+    second_company_id = create_company(client, "100000000002")
+    start_together = threading.Barrier(2)
+    status_codes = []
+
+    def book(company_id):
+        start_together.wait()
+        status_codes.append(create_meeting(client, company_id, FRIDAY_10_00).status_code)
+
+    threads = [threading.Thread(target=book, args=(company_id,)) for company_id in (first_company_id, second_company_id)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    # один успел, второй получил конфликт (не 500 и не 503), в БД одна встреча
+    assert sorted(status_codes) == [201, 409]
+    assert count_meetings(db) == 1
