@@ -13,7 +13,8 @@ pool = ConnectionPool(
     open=False,
     timeout=5,
     check=ConnectionPool.check_connection,
-    kwargs={"row_factory": dict_row},
+    # timezone=UTC - чтобы время из БД всегда приходило в UTC, как требует задание
+    kwargs={"row_factory": dict_row, "options": "-c timezone=UTC"},
 )
 
 
