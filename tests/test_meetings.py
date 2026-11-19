@@ -97,3 +97,90 @@ def test_meeting_unknown_manager(client):
 
     assert response.status_code == 404
     assert response.json()["error"] == "manager_not_found"
+
+
+def reschedule_meeting(client, meeting_id, starts_at):
+    return client.patch(f"/meetings/{meeting_id}", json={"starts_at": starts_at})
+
+
+def cancel_meeting(client, meeting_id):
+    return client.patch(f"/meetings/{meeting_id}", json={"status": "cancelled"})
+
+
+def test_reschedule_keeps_history(client):
+    company_id = create_company(client, "100000000001")
+    meeting_id = create_meeting(client, company_id, FRIDAY_10_00).json()["id"]
+
+    response = reschedule_meeting(client, meeting_id, FRIDAY_15_00)
+
+    assert response.status_code == 200
+    meeting = response.json()
+    assert meeting["starts_at"] == "2026-11-20T10:00:00Z"
+    assert meeting["ends_at"] == "2026-11-20T11:00:00Z"
+    # изначальное время не потерялось
+    assert meeting["original_starts_at"] == "2026-11-20T05:00:00Z"
+    assert [event["kind"] for event in meeting["history"]] == ["created", "rescheduled"]
+    assert [event["starts_at"] for event in meeting["history"]] == [
+        "2026-11-20T05:00:00Z",
+        "2026-11-20T10:00:00Z",
+    ]
+
+
+def test_reschedule_overlapping_own_old_time(client):
+    company_id = create_company(client, "100000000001")
+    meeting_id = create_meeting(client, company_id, FRIDAY_10_00).json()["id"]
+
+    # 10:30-11:30 пересекается со старым 10:00-11:00, но это та же встреча - не конфликт
+    response = reschedule_meeting(client, meeting_id, FRIDAY_10_30)
+
+    assert response.status_code == 200
+
+
+def test_reschedule_into_busy_slot(client, db):
+    first_company_id = create_company(client, "100000000001")
+    second_company_id = create_company(client, "100000000002")
+    create_meeting(client, first_company_id, FRIDAY_10_00)
+    second_meeting_id = create_meeting(client, second_company_id, FRIDAY_11_00).json()["id"]
+
+    response = reschedule_meeting(client, second_meeting_id, FRIDAY_10_30)
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "manager_busy"
+    saved_meeting = db.execute("SELECT starts_at FROM meetings WHERE id = %s", (second_meeting_id,)).fetchone()
+    assert saved_meeting["starts_at"].isoformat() == "2026-11-20T06:00:00+00:00"
+
+
+def test_reschedule_outside_working_hours(client):
+    company_id = create_company(client, "100000000001")
+    meeting_id = create_meeting(client, company_id, FRIDAY_10_00).json()["id"]
+
+    response = reschedule_meeting(client, meeting_id, FRIDAY_17_30)
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "outside_working_hours"
+
+
+def test_cancel_meeting_frees_slot(client):
+    first_company_id = create_company(client, "100000000001")
+    second_company_id = create_company(client, "100000000002")
+    meeting_id = create_meeting(client, first_company_id, FRIDAY_10_00).json()["id"]
+
+    response = cancel_meeting(client, meeting_id)
+
+    assert response.status_code == 200
+    meeting = response.json()
+    assert meeting["status"] == "cancelled"
+    assert [event["kind"] for event in meeting["history"]] == ["created", "cancelled"]
+    # отменённая встреча не занимает слот менеджера
+    assert create_meeting(client, second_company_id, FRIDAY_10_00).status_code == 201
+
+
+def test_cancelled_meeting_cannot_be_changed(client):
+    company_id = create_company(client, "100000000001")
+    meeting_id = create_meeting(client, company_id, FRIDAY_10_00).json()["id"]
+    cancel_meeting(client, meeting_id)
+
+    response = reschedule_meeting(client, meeting_id, FRIDAY_15_00)
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "meeting_cancelled"
