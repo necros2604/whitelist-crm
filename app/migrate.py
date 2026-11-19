@@ -1,9 +1,9 @@
-import os
 from pathlib import Path
 
 import psycopg
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://crm:crm@localhost:5432/crm")
+from app.db import DATABASE_URL
+
 MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
 
 
