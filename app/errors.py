@@ -26,7 +26,7 @@ class BusinessRuleError(AppError):
     status_code = 422
 
 
-# ограничения из migrations/001_init.sql -> понятная ошибка
+# ограничения из migrations/001_init.sql
 CONSTRAINT_ERRORS = {
     "companies_bin_key": ("bin_exists", "Компания с таким БИН уже есть"),
     "meetings_manager_overlap": ("manager_busy", "У менеджера уже есть встреча в это время"),
@@ -47,6 +47,11 @@ def register_error_handlers(app: FastAPI) -> None:
     def validation_error(request: Request, exc: RequestValidationError):
         parts = []
         for err in exc.errors():
+            if err["type"] == "json_invalid":
+                return error_response(
+                    # в loc тут не поле, а номер символа, где сломался JSON
+                    422, "invalid_json", f"Тело запроса - некорректный JSON (ошибка на символе {err['loc'][-1]})"
+                )
             field = ".".join(str(p) for p in err["loc"] if p != "body")
             msg = err["msg"].removeprefix("Value error, ")
             parts.append(f"{field}: {msg}" if field else msg)

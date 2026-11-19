@@ -1,0 +1,143 @@
+# Примеры запросов. В VS Code: расширение REST Client, кнопка "Send Request" над запросом.
+# Запускать по порядку сверху вниз на чистой базе (docker compose down -v && docker compose up --build -d).
+# Время в API - UTC. 2026-11-23 - понедельник, 10:00 по Алматы = 05:00 UTC.
+
+@base = http://localhost:8000
+
+### Проверка, что сервис и БД живы
+GET {{base}}/health
+
+
+### Компании
+
+# @name companyA
+POST {{base}}/companies
+Content-Type: application/json
+
+{"name": "ТОО Алматы Трейд Компани", "bin": "170340021554", "phone": "+77011234567"}
+
+###
+
+# @name companyB
+POST {{base}}/companies
+Content-Type: application/json
+
+{"name": "ТОО Кокжиек Курылыс", "bin": "210640900180", "phone": "+77017654321"}
+
+### Ошибка: такой БИН уже есть -> 409 bin_exists
+POST {{base}}/companies
+Content-Type: application/json
+
+{"name": "Другое название", "bin": "170340021554", "phone": "+77010000000"}
+
+### Ошибка: БИН не 12 цифр -> 422 validation_error
+POST {{base}}/companies
+Content-Type: application/json
+
+{"name": "ТОО Ромашка", "bin": "2l064090Ol80", "phone": "+77010000000"}
+
+### Список с пагинацией
+GET {{base}}/companies?limit=10&offset=0
+
+
+### Встречи
+
+# @name meetingA
+POST {{base}}/meetings
+Content-Type: application/json
+
+{"manager_id": 1, "company_id": {{companyA.response.body.id}}, "starts_at": "2026-11-23T05:00:00Z"}
+
+### Ошибка: у менеджера уже есть встреча 10:00-11:00, 10:30 пересекается -> 409 manager_busy
+POST {{base}}/meetings
+Content-Type: application/json
+
+{"manager_id": 1, "company_id": {{companyB.response.body.id}}, "starts_at": "2026-11-23T10:30:00+05:00"}
+
+### Сразу после 10:00-11:00 в 11:00 - не конфликт -> 201
+# @name meetingB
+POST {{base}}/meetings
+Content-Type: application/json
+
+{"manager_id": 1, "company_id": {{companyB.response.body.id}}, "starts_at": "2026-11-23T11:00:00+05:00"}
+
+### Ошибка: у компании уже есть активная встреча (даже с другим менеджером) -> 409 company_has_meeting
+POST {{base}}/meetings
+Content-Type: application/json
+
+{"manager_id": 2, "company_id": {{companyA.response.body.id}}, "starts_at": "2026-11-23T15:00:00+05:00"}
+
+### Ошибка: 17:30 по Алматы, встреча закончится в 18:30 -> 422 outside_working_hours
+POST {{base}}/meetings
+Content-Type: application/json
+
+{"manager_id": 2, "company_id": {{companyA.response.body.id}}, "starts_at": "2026-11-23T17:30:00+05:00"}
+
+### Ошибка: время без часового пояса -> 422 validation_error
+POST {{base}}/meetings
+Content-Type: application/json
+
+{"manager_id": 2, "company_id": {{companyA.response.body.id}}, "starts_at": "2026-11-23T10:00:00"}
+
+
+### Звонки
+
+### Ошибка: meeting_set без встречи -> 422 validation_error
+POST {{base}}/calls
+Content-Type: application/json
+
+{"company_id": {{companyA.response.body.id}}, "result": "meeting_set"}
+
+### Ошибка: meeting_set со встречей другой компании -> 422 meeting_other_company
+POST {{base}}/calls
+Content-Type: application/json
+
+{"company_id": {{companyA.response.body.id}}, "result": "meeting_set", "meeting_id": {{meetingB.response.body.id}}}
+
+### meeting_set с созданной встречей -> 201, статус компании meeting_set
+POST {{base}}/calls
+Content-Type: application/json
+
+{"company_id": {{companyA.response.body.id}}, "result": "meeting_set", "meeting_id": {{meetingA.response.body.id}}, "comment": "Договорились на понедельник"}
+
+### Звонок без ответа -> статус компании no_answer
+POST {{base}}/calls
+Content-Type: application/json
+
+{"company_id": {{companyB.response.body.id}}, "result": "no_answer"}
+
+### Фильтр по статусу
+GET {{base}}/companies?status=meeting_set
+
+
+### Перенос и отмена
+
+### Перенос на 15:00 по Алматы -> в history видно created и rescheduled, original_starts_at не меняется
+PATCH {{base}}/meetings/{{meetingA.response.body.id}}
+Content-Type: application/json
+
+{"starts_at": "2026-11-23T15:00:00+05:00"}
+
+### Расписание менеджера на день (день по Алматы)
+GET {{base}}/managers/1/schedule?date=2026-11-23
+
+### Отмена встречи
+PATCH {{base}}/meetings/{{meetingB.response.body.id}}
+Content-Type: application/json
+
+{"status": "cancelled"}
+
+### Ошибка: отменённую встречу нельзя перенести -> 409 meeting_cancelled
+PATCH {{base}}/meetings/{{meetingB.response.body.id}}
+Content-Type: application/json
+
+{"starts_at": "2026-11-23T16:00:00+05:00"}
+
+### Ошибка: нет такой встречи -> 404 meeting_not_found
+PATCH {{base}}/meetings/999
+Content-Type: application/json
+
+{"status": "cancelled"}
+
+### Ошибка: нет такого менеджера -> 404 manager_not_found
+GET {{base}}/managers/999/schedule?date=2026-11-23

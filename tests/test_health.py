@@ -10,3 +10,12 @@ def test_validation_error_format(client):
     body = r.json()
     assert body["error"] == "validation_error"
     assert "bin" in body["message"]
+
+
+def test_invalid_json(client):
+    broken_json = '{"name": "ТОО Ромашка", "bin": {{company.id}}}'
+
+    response = client.post("/companies", content=broken_json, headers={"Content-Type": "application/json"})
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "invalid_json"
