@@ -1,12 +1,11 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, status
 
+from app.rules import MEETING_DURATION
 from app.schemas import MeetingCreate, MeetingEvent, MeetingOut, MeetingStatus, MeetingUpdate
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
-
-MEETING_DURATION = timedelta(minutes=60)
 
 
 @router.post("", response_model=MeetingOut, status_code=status.HTTP_201_CREATED)
